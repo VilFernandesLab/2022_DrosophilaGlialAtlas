@@ -1,0 +1,271 @@
+---
+title: "GO Analysis for Paper"
+output: word_document
+---
+
+
+# Loading required packages
+
+```{r Loading packages }
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+library(Seurat)
+library(ggplot2)
+library(stringr)
+library(dplyr)
+library(clusterProfiler)
+library(GOSemSim)
+library(GO.db)
+library("org.Dm.eg.db")
+library(clusterProfiler)
+library(annotate)
+library(enrichplot)
+```
+
+
+
+#Load Data
+
+```{r GO BP Database }
+# loads in the GO term database for Drosophila melanogaster biological processes (BP)
+
+dmGO_BP <- godata('org.Dm.eg.db', ont = "BP", computeIC = TRUE) # biological processes
+
+# converting ID's from ENTREZID to ENSEMBL and symbol
+gene <- dmGO_BP@geneAnno[["ENTREZID"]]
+gene.df.BP <- bitr(gene, fromType = "ENTREZID",
+        toType = c("ENSEMBL", "SYMBOL"),
+        OrgDb = org.Dm.eg.db) #3.51% of input gene IDs failed to map
+
+```
+
+
+```{r Sequencing Data }
+AdultGlia_Int <- readRDS("~/Documents/VilLab/Manuscript/Ines_Data/latest/ThirdReintegrated_18dim_04res_AllClusterNrs_Names.rds") #clean, integrated adult glia dataset
+```
+
+
+#Figure 6 - Figure S2 - Multiplet Analysis
+
+##Astrocyte Clusters
+
+First we find the enriched GO biological processes (BP) terms for each of the astrocyte multiplets.
+```{r Astrocyte GO BP }
+#Find differentially expressed genes, using a log2fc threshold of 0.25
+ALG1_vs_ALG2_0.25 <- FindMarkers(AdultGlia_Int, ident.1 = "Astrocytes_1", "Astrocytes_2", logfc.threshold = 0.25, assay = 'RNA')
+ALG1_vs_ALG2_0.25 <- ALG1_vs_ALG2_0.25[which(ALG1_vs_ALG2_0.25$avg_log2FC > 0),]
+ALG2_vs_ALG1_0.25 <- FindMarkers(AdultGlia_Int, ident.1 = "Astrocytes_2", "Astrocytes_1", logfc.threshold = 0.25, assay = 'RNA')
+ALG2_vs_ALG1_0.25 <- ALG2_vs_ALG1_0.25[which(ALG2_vs_ALG1_0.25$avg_log2FC > 0),] 
+
+
+# astrocyte_1 cluster:
+
+ALG1_DEG_df <- gene.df.BP[gene.df.BP$SYMBOL %in% rownames(ALG1_vs_ALG2_0.25),] # subsets BP dataframe for only the genes that are differentially expressed, this way we can refer to the flybase IDs or entrez IDs if needed
+
+
+ALG1_DEG_GO_BP <- enrichGO(gene = ALG1_DEG_df$SYMBOL,   # carries out GO enrichment analysis for BP
+                OrgDb = org.Dm.eg.db,
+                keyType = "SYMBOL",
+                ont = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                qvalueCutoff = 0.05
+                )
+
+ALG1_DEG_GO_BP <- simplify(ALG1_DEG_GO_BP, cutoff=0.7, by="p.adjust", select_fun=min) #simplifies the GO enrichment by removing redundant GO terms
+
+
+
+# astrocyte_2 cluster:
+
+ALG2_DEG_df <- gene.df.BP[gene.df.BP$SYMBOL %in% rownames(ALG2_vs_ALG1_0.25),] # subsets BP dataframe for only the genes that are differentially expressed, this way we can refer to the flybase IDs or entrez IDs if needed
+
+
+ALG2_DEG_GO_BP <- enrichGO(gene = ALG2_DEG_df$SYMBOL,   # carries out GO enrichment analysis for BP
+                OrgDb = org.Dm.eg.db,
+                keyType = "SYMBOL",
+                ont = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                qvalueCutoff = 0.05
+                )
+
+ALG2_DEG_GO_BP <- simplify(ALG2_DEG_GO_BP, cutoff=0.7, by="p.adjust", select_fun=min) #simplifies the GO enrichment by removing redundant GO terms
+```
+
+
+Then we select the most significant terms and combine the results to enable hierarchical clustering and plotting on a heatmap.
+```{r Astrocyte multiplet heatmap}
+
+#Select top 20 GO terms according to adjusted p-value:
+astr1data <- arrange(ALG1_DEG_GO_BP@result, p.adjust)
+astr1data <- astr1data[1:20,]
+astr1data$Class <- "Astrocyte_1"
+
+astr2data <- arrange(ALG2_DEG_GO_BP@result, p.adjust)
+astr2data <- astr2data[1:20,]
+astr2data$Class <- "Astrocyte_2"
+
+#Combine enrichResults:
+bothdata <- rbind(astr1data, astr2data) #binds the dataframes
+bothBPGO <- ALG1_DEG_GO_BP
+bothdata_unique <- bothdata[!duplicated(bothdata$ID),] #creates a version of both data where there are no repeats of GO terms - this is important as can only have unique terms when using the pairwise_termsim function below!
+bothBPGO@result <- bothdata_unique #this has 40 terms
+
+
+#Carry out hierarchical clustering of the GO terms:
+##calculate a similarity matrix
+GOterm_sim <- pairwise_termsim(bothBPGO, method="Wang", semData = dmGO_BP) #dmGO_BP is a GOSemSimDATA that was created under the load data section previously
+d <- dist(GOterm_sim@termsim) # creates a distance matrix
+plot(hclust(d, method = "ward.D")) # gives us hierarchical tree of GO terms
+ord <- hclust(d, method = "ward.D")$order #gives us an order that we can arrange the GO terms by based on the tree
+
+#ordered dataframe of astrocyte multiplet GO terms
+Astr1_2_final <- bothdata
+Astr1_2_final$Description <- factor(Astr1_2_final$Description, levels = bothdata_unique$Description[ord])
+
+#calculating the negative log of the false discovery rate (FDR = p.adjust)  
+Astr1_2_final$neg_log_padj <- log10(Astr1_2_final$p.adjust) * -1
+
+
+#Heatmap of the GO BP enrichment for the astrocyte multiplets: Astrocyte_1 and Astrocyte_2
+ggplot(Astr1_2_final, aes(x = Class, y = Description, fill = neg_log_padj)) +
+  geom_tile() + theme_classic(19) + 
+  scale_fill_viridis_c(option = "mako", begin = 1, end = 0, name = "-log(FDR)") + 
+  coord_flip() +
+  theme(axis.text.x = element_text( angle = 90, hjust = 1, vjust = 0.5)) 
+
+```
+
+
+#Figure 8 - Lamina Vs General Glia
+
+First we find the enriched GO BP terms for the pooled lamina and pooled general glia clusters.
+```{r Lamina vs General glia GO BP }
+#Defining the lamina and general glia clusters in the adult optic lobe data
+Lam_clusts <- c("Fenestrated", "Distal satellite glia", "Proximal satellite glia", "Epithelial", "Chalice", "Pseudo-cartridge", "Marginal")
+Gen_clusts <- c("Astrocytes_1","Perineurial","Ensheathing_1","Cortex_1","Subperineurial") #chiasm cluster excluded as does not fit clearly into either grouping
+
+#Find DEGs between the pooled lamina and pooled general glia clusters, using a threshold of 1
+Lam_markers<- FindMarkers(AdultGlia_Int, ident.1 = Lam_clusts, ident.2 = Gen_clusts, logfc.threshold = 1, assay = "RNA")
+Gen_markers <- FindMarkers(AdultGlia_Int, ident.1 = Gen_clusts, ident.2 = Lam_clusts, logfc.threshold = 1, assay = "RNA")
+
+gliaDEG_Lam <- Lam_markers[which(Lam_markers$avg_log2FC > 0),] #selecting +ve FC
+gliaDEG_Gen <- Gen_markers[which(Gen_markers$avg_log2FC > 0),] #selecting +ve FC
+
+
+# lamina glia clusters:
+lam_DEG_df <- gene.df.BP[gene.df.BP$SYMBOL %in% rownames(gliaDEG_Lam),] # subsets BP dataframe for only the genes that are differentially expressed
+
+lam_DEG_GO_BP <- enrichGO(gene = lam_DEG_df$SYMBOL,   # carries out GO enrichment analysis for BP
+                OrgDb = org.Dm.eg.db,
+                keyType = "SYMBOL",
+                ont = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                qvalueCutoff = 0.05
+                )
+
+lam_DEG_GO_BP <- simplify(lam_DEG_GO_BP, cutoff=0.7, by="p.adjust", select_fun=min) #simplifies the GO enrichment by removing redundant GO terms
+
+
+
+# general glia clusters:
+
+gen_DEG_df <- gene.df.BP[gene.df.BP$SYMBOL %in% rownames(gliaDEG_Gen),] # subsets BP dataframe for only the genes that are differentially expressed, this way we can refer to the flybase IDs or entrez IDs if needed
+
+
+gen_DEG_GO_BP <- enrichGO(gene = gen_DEG_df$SYMBOL,   # carries out GO enrichment analysis for BP
+                OrgDb = org.Dm.eg.db,
+                keyType = "SYMBOL",
+                ont = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff = 0.05,
+                qvalueCutoff = 0.05
+                )
+
+gen_DEG_GO_BP <- simplify(gen_DEG_GO_BP, cutoff=0.7, by="p.adjust", select_fun=min) #simplifies the GO enrichment by removing redundant GO terms
+
+```
+
+```{r Lamina vs General glia GO BP heatmap}
+
+#Select top 20 GO terms according to adjusted p-value:
+lamdata <- arrange(lam_DEG_GO_BP@result, p.adjust)
+lamdata <- lamdata[1:20,]
+lamdata$Class <- "Lamina"
+
+gendata <- arrange(gen_DEG_GO_BP@result, p.adjust)
+gendata <- gendata[1:20,]
+gendata$Class <- "General"
+
+
+#Combine enrichResults:
+bothdata <- rbind(lamdata, gendata) #binds the dataframes
+View(bothdata)
+
+#As there are some redundant terms remaining we manually remove those that are less significant and keep the term that encompasses them all
+bothdata$Description <- as.character(bothdata$Description)
+
+###these terms all can be described under the term tube morphogenesis
+bothdata <- bothdata[-which(bothdata$Description == "renal system development" |
+                           bothdata$Description == "urogenital system development" |
+                           #bothdata$Description == "regulation of tube architecture, open tracheal system" | keep this as lowest p-val and rename later
+                           bothdata$Description == "heart morphogenesis" |
+                           bothdata$Description == "imaginal disc-derived wing morphogenesis"),]
+
+bothdata <- bothdata[-which(bothdata$Description == "germ cell migration"),] #remove this as cell migration encapsulates this term and is more significant
+
+
+bothBPGO <- lam_DEG_GO_BP
+bothdata_unique <- bothdata[!duplicated(bothdata$ID),] #creates a version of both data where there are no repeats of GO terms - this is important as can only have unique terms when using the pairwise_termsim function below!
+bothBPGO@result <- bothdata_unique 
+
+
+
+#Creating heirarchical clustering of the GO terms
+GOterm_sim <- pairwise_termsim(bothBPGO, method="Wang", semData = dmGO_BP) #dmGO_BP is a GOSemSimDATA that was created under the load data section previously
+d <- dist(GOterm_sim@termsim)
+plot(hclust(d, method = "ward.D"))
+ord <- hclust(d, method = "ward.D")$order #this gives us an order that we can arrange the GO terms by
+
+
+#now we rename the GO terms that are poorly annotated (renamed based on the genes found under lam_gen_final$geneID)
+lam_gen_final <- bothdata
+
+lam_gen_final$Description <- as.character(lam_gen_final$Description)
+lam_gen_final$Description[which(lam_gen_final$Description == "wing disc development")] <- "tissue patterning"
+lam_gen_final$Description[which(lam_gen_final$Description == "regulation of tube architecture, open tracheal system")] <- "tube morphogenesis"
+lam_gen_final$Description[which(lam_gen_final$Description == "biological process involved in interspecies interaction between organisms")] <- "interspecies interaction between organisms"
+
+bothdata_unique$Description <- as.character(bothdata_unique$Description)
+bothdata_unique$Description[which(bothdata_unique$Description == "wing disc development")] <- "tissue patterning"
+bothdata_unique$Description[which(bothdata_unique$Description == "regulation of tube architecture, open tracheal system")] <- "tube morphogenesis"
+bothdata_unique$Description[which(bothdata_unique$Description == "biological process involved in interspecies interaction between organisms")] <- "interspecies interaction between organisms"
+
+
+lam_gen_final$Description <- factor(lam_gen_final$Description, levels = bothdata_unique$Description[ord])
+
+#calculating the negative log of the false discovery rate (FDR = p.adjust)  
+lam_gen_final$neg_log_padj <- log10(lam_gen_final$p.adjust) * -1
+
+#Heatmap
+ggplot(lam_gen_final, aes(x = Class, y = Description, fill = neg_log_padj)) +
+  geom_tile() + theme_classic(19) + 
+  scale_fill_viridis_c(option = "mako", begin = 1, end = 0, name = "-log(FDR)") +
+  #scale_fill_gradientn(name = "-log(FDR)",colours=c("blue", "red")) +
+  coord_flip() +
+  theme(axis.text.x = element_text( angle = 90, hjust = 1, vjust = 0.5)) +
+  scale_x_discrete(labels = c('Lamina glia','Generic glia'))
+
+```
+
+
+
+
+
+
+
+
+
