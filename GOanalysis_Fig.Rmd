@@ -1,5 +1,5 @@
 ---
-title: "GO Analysis for Paper"
+title: "GO Analysis for Drosophila Glial Atlas Paper"
 output: word_document
 ---
 
@@ -260,12 +260,3 @@ ggplot(lam_gen_final, aes(x = Class, y = Description, fill = neg_log_padj)) +
   scale_x_discrete(labels = c('Lamina glia','Generic glia'))
 
 ```
-
-
-
-
-
-
-
-
-
