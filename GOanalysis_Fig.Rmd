@@ -254,7 +254,6 @@ lam_gen_final$neg_log_padj <- log10(lam_gen_final$p.adjust) * -1
 ggplot(lam_gen_final, aes(x = Class, y = Description, fill = neg_log_padj)) +
   geom_tile() + theme_classic(19) + 
   scale_fill_viridis_c(option = "mako", begin = 1, end = 0, name = "-log(FDR)") +
-  #scale_fill_gradientn(name = "-log(FDR)",colours=c("blue", "red")) +
   coord_flip() +
   theme(axis.text.x = element_text( angle = 90, hjust = 1, vjust = 0.5)) +
   scale_x_discrete(labels = c('Lamina glia','Generic glia'))
