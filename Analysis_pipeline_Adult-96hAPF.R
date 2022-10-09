@@ -265,7 +265,10 @@ library(ggplot2)
         
 # Select markers for validation (clean previous objects)
         # open RDS
-        integrated.adult <- readRDS("ThirdReintegrated_18dim,04res_AllClusterNrs.rds")
+        integrated.adult <- readRDS("ThirdReintegrated_18dim,04res_AllClusterNrs.rds"
+        # get csv file with gene markers for each cluster compared to all other clusters
+        allmarkers <- FindAllMarkers(integrated.adult, only.pos = TRUE)
+        write.csv(allmarkers, 'AllMarkers_ThirdReintegrated_18dim,04res_AllClusterNrs.csv')
         # get csv file with gene markers for each cluster comparison
         clusterA <- "1" # number of the clusters to compare; use c("2","1") if comparing a group of clusters
         clusterB <- "0" 
