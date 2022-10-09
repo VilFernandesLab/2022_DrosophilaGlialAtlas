@@ -80,6 +80,11 @@ library(ggplot2)
         plot1
         saveRDS(embryo, file = "embryo_glia_10mito_050522_neuroclean1_HmlClean_reanalysed16dims05res.rds")
 
+# Get csv file with gene markers for each cluster compared to all other clusters
+        data <- readRDS("embryo_glia_10mito_050522_neuroclean1_HmlClean_reanalysed16dims05res.rds")
+        allmarkers <- FindAllMarkers(data, only.pos = TRUE)
+        write.csv(allmarkers, 'AllMarkers_embryo_glia_10mito_050522_neuroclean1_HmlClean_reanalysed16dims05res.csv')
+
 # Plot FeaturePlot for UMAP with feature (gene) expression (clean previous objects)
         data <- readRDS("embryo_glia_10mito_050522_neuroclean1_HmlClean_reanalysed16dims05res.rds")
         gene <- "wrapper"
